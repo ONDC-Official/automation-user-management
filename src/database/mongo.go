@@ -93,6 +93,29 @@ func Aggregate(collectionName string, pipeline interface{}, results interface{})
 	return cursor.All(ctx, results)
 }
 
+// UpsertOne updates a single document, inserting it if it does not exist.
+func UpsertOne(collectionName string, filter interface{}, update interface{}) (*mongo.UpdateResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	opts := options.Update().SetUpsert(true)
+	return GetCollection(collectionName).UpdateOne(ctx, filter, update, opts)
+}
+
+// EnsureUniqueIndex creates a unique index on the given field for a collection.
+func EnsureUniqueIndex(collectionName string, fieldName string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	collection := GetCollection(collectionName)
+	indexModel := mongo.IndexModel{
+		Keys:    map[string]interface{}{fieldName: 1},
+		Options: options.Index().SetUnique(true),
+	}
+
+	_, err := collection.Indexes().CreateOne(ctx, indexModel)
+	return err
+}
+
 // EnsureTTLIndex creates a TTL index on a field that automatically deletes documents after a certain duration.
 func EnsureTTLIndex(collectionName string, fieldName string, expireAfterSeconds int32) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -35,6 +35,10 @@ func main() {
 		log.Println("Warning: Failed to create TTL index for exchange_codes:", err)
 	}
 
+	if err := database.EnsureUniqueIndex("scenario_preferences", "user_id"); err != nil {
+		log.Println("Warning: Failed to create unique index for scenario_preferences:", err)
+	}
+
 	app := fiber.New()
 
 	// CORS: allow frontend origin (credentials for cookies/session)

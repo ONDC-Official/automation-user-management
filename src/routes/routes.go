@@ -39,4 +39,9 @@ func Setup(app *fiber.App) {
 	api.Post("api/notes", handlers.HandleCreateNote)
 	api.Put("api/notes/:id", handlers.HandleUpdateNote)
 	api.Delete("api/notes/:id", handlers.HandleDeleteNote)
+
+	// Scenario Preferences
+	api.Get("user/scenario-preferences", handlers.HandleGetScenarioPreferences)
+	api.Put("user/scenario-preferences/:config_key", handlers.HandleUpsertScenarioPreference)
+	api.Delete("user/scenario-preferences/:config_key", handlers.HandleDeleteScenarioPreference)
 }
