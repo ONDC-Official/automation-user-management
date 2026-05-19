@@ -1,12 +1,13 @@
-name: Dev Deployment
+name: Branch Deployment
 
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
+    branches: ["main", "dev"]
 
 jobs:
-  ssh-ec2:
+  deploy-staging:
+    if: github.ref_name == 'main'
     runs-on: ubuntu-latest
 
     steps:
@@ -62,11 +63,7 @@ jobs:
           GITHUB_CLIENT_SECRET=${{ secrets.CLIENT_SECRET_GITHUB }}
           JWT_SECRET=${{ secrets.JWT_SECRET }}
           GITHUB_REDIRECT_URL=${{ secrets.REDIRECT_URL_GITHUB }}
-
-
-
           CLIENT_URL=https://workbench.ondc.tech
-          
           MONGO_URI=mongodb://localhost:27017
           DB_NAME=developer_guide
           EOL
@@ -101,6 +98,102 @@ jobs:
 
           echo "Starting new containers..."
           sudo docker compose -p developer-guide-prod up -d --build
+
+          echo "Deployment complete"
+          EOF
+
+  deploy-dev:
+    if: github.ref_name == 'dev'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: SSH Setup and Clone Repo
+        run: |
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > key.pem
+          chmod 600 key.pem
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+          ssh -i key.pem ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} << 'EOF'
+          REPO_DIR=/home/ahsan_witslab/automation-developer-guide
+
+          echo "Cleaning old directory..."
+          rm -rf $REPO_DIR
+
+          echo "Cloning fresh repo..."
+          git clone --branch dev https://github.com/ONDC-Official/automation-developer-guide.git $REPO_DIR
+          EOF
+
+      - name: Install Docker Compose (if missing)
+        run: |
+          ssh -i key.pem ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} << 'EOF'
+          if ! command -v docker &> /dev/null
+          then
+            echo "Docker not installed. Install it first."
+            exit 1
+          fi
+
+          if ! docker compose version &> /dev/null
+          then
+            echo "Installing Docker Compose plugin..."
+            sudo apt-get update
+            sudo apt-get install -y docker-compose-plugin
+          else
+            echo "Docker Compose already installed"
+          fi
+          EOF
+
+      - name: Write .env file on EC2
+        run: |
+          ssh -i key.pem ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} << 'EOF'
+          REPO_DIR=/home/ahsan_witslab/automation-developer-guide
+
+          echo "Creating fresh .env file..."
+          cat > $REPO_DIR/.env <<EOL
+          PORT=8081
+          ENV=development
+          GITHUB_CLIENT_ID=${{ secrets.CLIENT_ID_GITHUB_DEV || secrets.CLIENT_ID_GITHUB }}
+          GITHUB_CLIENT_SECRET=${{ secrets.CLIENT_SECRET_GITHUB_DEV || secrets.CLIENT_SECRET_GITHUB }}
+          JWT_SECRET=${{ secrets.JWT_SECRET_DEV || secrets.JWT_SECRET }}
+          GITHUB_REDIRECT_URL=${{ secrets.REDIRECT_URL_GITHUB_DEV || secrets.REDIRECT_URL_GITHUB }}
+          CLIENT_URL=https://dev-automation.ondc.org
+          MONGO_URI=mongodb://localhost:27017
+          DB_NAME=developer_guide
+          EOL
+          EOF
+
+      - name: Verify required files
+        run: |
+          ssh -i key.pem ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} << 'EOF'
+          REPO_DIR=/home/ahsan_witslab/automation-developer-guide
+
+          if [ ! -f $REPO_DIR/.env ]; then
+            echo ".env missing"
+            exit 1
+          fi
+
+          if [ ! -f $REPO_DIR/docker-compose.yml ]; then
+            echo "docker-compose.yml missing"
+            exit 1
+          fi
+
+          echo "All required files exist"
+          EOF
+
+      - name: Deploy using Docker Compose
+        run: |
+          ssh -i key.pem ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} << 'EOF'
+          REPO_DIR=/home/ahsan_witslab/automation-developer-guide
+          cd $REPO_DIR
+
+          echo "Stopping old containers..."
+          sudo docker compose -p developer-guide-dev down || true
+
+          echo "Starting new containers..."
+          sudo docker compose -p developer-guide-dev up -d --build
 
           echo "Deployment complete"
           EOF
