@@ -61,4 +61,4 @@ Cookies are not used for authorization, making the backend fully cross-origin co
 
 ## License
 
-See repository license.
+See repository license.   
