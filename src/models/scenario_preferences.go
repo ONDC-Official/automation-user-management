@@ -6,6 +6,7 @@ type PreferenceConfig struct {
 	Version       string `json:"version"        bson:"version"`
 	NpType        string `json:"np_type"        bson:"np_type"`
 	Env           string `json:"env"            bson:"env"`
+	UsecaseID     string `json:"usecase_id"     bson:"usecase_id"`
 }
 
 // PreferenceEntry stores a single preference keyed by "k" to avoid BSON
