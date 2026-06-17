@@ -1,19 +1,18 @@
 name: Build and Deploy to EKS
 
 on:
+  workflow_dispatch:
   push:
     branches:
-      - dev
       - main
+      - dev
 
 permissions:
-  contents: read
   packages: write
 
 jobs:
   build-and-push-image:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -33,65 +32,61 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read version and compute image tag
+      - name: Read version and compute image tags
         run: |
-          if [[ -f VERSION ]]; then
+          if [ -f VERSION ]; then
             SEMVER=$(tr -d '[:space:]' < VERSION)
           else
             SEMVER=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --match '[0-9]*' 2>/dev/null | sed 's/^v//' || true)
           fi
-
-          if [[ -z "${SEMVER}" ]]; then
-            SEMVER="0.0.0"
-          fi
+          [ -z "$SEMVER" ] && SEMVER="0.0.0"
 
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
 
-          if [[ "${{ github.ref_name }}" == "main" ]]; then
-            ENV_PREFIX="staging"
-            echo "ENVIRONMENT=staging" >> $GITHUB_ENV
-            echo "TARGET_FILE=k8/aws/helm/service-layer/values-staging.yaml" >> $GITHUB_ENV
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            ENVIRONMENT=staging
+            IMAGE_TAG="staging-${SEMVER}-${SHORT_SHA}"
+            TARGET_FILE="k8/aws/helm/service-layer/values-staging.yaml"
+            TAGS="ghcr.io/$REPO_LOWER:${IMAGE_TAG}\nghcr.io/$REPO_LOWER:latest"
           else
-            ENV_PREFIX="dev"
-            echo "ENVIRONMENT=dev" >> $GITHUB_ENV
-            echo "TARGET_FILE=k8/aws/helm/service-layer/values.yaml" >> $GITHUB_ENV
+            ENVIRONMENT=dev
+            IMAGE_TAG="dev-${SEMVER}-${SHORT_SHA}"
+            TARGET_FILE="k8/aws/helm/service-layer/values.yaml"
+            TAGS="ghcr.io/$REPO_LOWER:${IMAGE_TAG}"
           fi
 
-          IMAGE_TAG="${ENV_PREFIX}-${SEMVER}-${SHORT_SHA}"
-
-          echo "SEMVER=${SEMVER}" >> $GITHUB_ENV
-          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
-
+          echo "SEMVER=$SEMVER" >> $GITHUB_ENV
+          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
+          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo -e "REPO_LOWER=$REPO_LOWER\nTARGET_FILE=$TARGET_FILE" >> $GITHUB_ENV
           {
             echo 'IMAGE_TAGS<<EOF'
-            echo "ghcr.io/${REPO_LOWER}:${IMAGE_TAG}"
-
-            if [[ "${{ github.ref_name }}" == "main" ]]; then
-              echo "ghcr.io/${REPO_LOWER}:latest"
-            fi
-
+            echo -e "$TAGS"
             echo EOF
           } >> $GITHUB_ENV
 
-      - name: Docker metadata (OCI labels)
-        id: meta
+      - name: Set image metadata (OCI labels)
+        id: metadata
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ env.REPO_LOWER }}
+          tags: ${{ env.IMAGE_TAG }}
           labels: |
-            org.opencontainers.image.version=${{ env.SEMVER }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.source=${{ github.event.repository.html_url }}
+            org.opencontainers.image.version=${{ env.SEMVER }}
 
-      - name: Build and push Docker image
+      - name: Build and push Docker image (with layer cache)
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: ${{ env.IMAGE_TAGS }}
-          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          labels: ${{ steps.metadata.outputs.labels }}
 
       - name: Generate GitHub App token
         id: app-token
@@ -111,8 +106,7 @@ jobs:
       - name: Update image tag in Helm values file
         run: |
           python3 << 'PYEOF'
-          import os
-          import re
+          import re, os
 
           target = f"automation-iac/{os.environ['TARGET_FILE']}"
           image_tag = os.environ['IMAGE_TAG']
@@ -155,10 +149,8 @@ jobs:
 
           if not found_service:
               raise RuntimeError(f"automationUserManagement not found in {target}")
-
           if not found_repository:
               raise RuntimeError(f"automationUserManagement.image.repository not found in {target}")
-
           if not updated:
               raise RuntimeError(f"automationUserManagement.image.tag not found in {target}")
 
@@ -173,12 +165,9 @@ jobs:
       - name: Commit and push tag update to IaC repo
         run: |
           cd automation-iac
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git add "${{ env.TARGET_FILE }}"
-
           if git diff --staged --quiet; then
             echo "Image tag already up to date in ${{ env.TARGET_FILE }}, skipping commit."
           else
