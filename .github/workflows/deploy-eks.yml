@@ -5,34 +5,27 @@ on:
   push:
     branches:
       - main
-      - dev
+      - release-staging
 
 permissions:
   packages: write
 
 jobs:
-  build-and-push-image:
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      semver:      ${{ steps.set.outputs.semver }}
+      image_tag:   ${{ steps.set.outputs.image_tag }}
+      environment: ${{ steps.set.outputs.environment }}
+      target_file: ${{ steps.set.outputs.target_file }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set repository name to lowercase
-        run: echo "REPO_LOWER=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Read version and compute image tags
+      - name: Read version and compute image tag
+        id: set
         run: |
           if [ -f VERSION ]; then
             SEMVER=$(tr -d '[:space:]' < VERSION)
@@ -42,52 +35,67 @@ jobs:
           [ -z "$SEMVER" ] && SEMVER="0.0.0"
 
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
-          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
 
           if [ "${{ github.ref_name }}" = "main" ]; then
-            ENVIRONMENT=staging
-            IMAGE_TAG="staging-${SEMVER}-${SHORT_SHA}"
-            TARGET_FILE="k8/aws/helm/service-layer/values-staging.yaml"
-            TAGS="ghcr.io/$REPO_LOWER:${IMAGE_TAG}\nghcr.io/$REPO_LOWER:latest"
+            ENV=dev
+            TARGET="k8/aws/helm/service-layer/values.yaml"
           else
-            ENVIRONMENT=dev
-            IMAGE_TAG="dev-${SEMVER}-${SHORT_SHA}"
-            TARGET_FILE="k8/aws/helm/service-layer/values.yaml"
-            TAGS="ghcr.io/$REPO_LOWER:${IMAGE_TAG}"
+            ENV=staging
+            TARGET="k8/aws/helm/service-layer/values-staging.yaml"
           fi
 
-          echo "SEMVER=$SEMVER" >> $GITHUB_ENV
-          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
-          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-          echo -e "REPO_LOWER=$REPO_LOWER\nTARGET_FILE=$TARGET_FILE" >> $GITHUB_ENV
-          {
-            echo 'IMAGE_TAGS<<EOF'
-            echo -e "$TAGS"
-            echo EOF
-          } >> $GITHUB_ENV
+          IMAGE_TAG="${ENV}-${SEMVER}-${SHORT_SHA}"
 
-      - name: Set image metadata (OCI labels)
+          echo "semver=${SEMVER}"       >> $GITHUB_OUTPUT
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "environment=${ENV}"     >> $GITHUB_OUTPUT
+          echo "target_file=${TARGET}"  >> $GITHUB_OUTPUT
+
+  build-and-push:
+    needs: version
+    runs-on: ubuntu-latest
+    environment: ${{ needs.version.outputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Set image metadata
         id: metadata
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ env.REPO_LOWER }}
-          tags: ${{ env.IMAGE_TAG }}
+          images: ghcr.io/ondc-official/automation-user-management
+          tags: |
+            type=raw,value=${{ needs.version.outputs.image_tag }}
+            type=raw,value=latest,enable=${{ github.ref_name != 'main' }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.event.repository.html_url }}
-            org.opencontainers.image.version=${{ env.SEMVER }}
+            org.opencontainers.image.version=${{ needs.version.outputs.semver }}
 
-      - name: Build and push Docker image (with layer cache)
+      - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ env.IMAGE_TAGS }}
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          labels: ${{ steps.metadata.outputs.labels }}
 
+  update-iac:
+    needs: [version, build-and-push]
+    runs-on: ubuntu-latest
+    steps:
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -96,7 +104,7 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           repositories: automation-iac
 
-      - name: Clone automation-iac repo
+      - name: Checkout automation-iac
         uses: actions/checkout@v4
         with:
           repository: ONDC-Official/automation-iac
@@ -156,10 +164,12 @@ jobs:
 
           with open(target, 'w') as f:
               f.writelines(result)
+
+          print(f"Updated automationUserManagement image tag to: {image_tag}")
           PYEOF
         env:
-          TARGET_FILE: ${{ env.TARGET_FILE }}
-          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          TARGET_FILE:         ${{ needs.version.outputs.target_file }}
+          IMAGE_TAG:           ${{ needs.version.outputs.image_tag }}
           EXPECTED_REPOSITORY: ghcr.io/ondc-official/automation-user-management
 
       - name: Commit and push tag update to IaC repo
@@ -167,10 +177,13 @@ jobs:
           cd automation-iac
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "${{ env.TARGET_FILE }}"
+          git add "${{ needs.version.outputs.target_file }}"
           if git diff --staged --quiet; then
-            echo "Image tag already up to date in ${{ env.TARGET_FILE }}, skipping commit."
+            echo "Image tag already up to date, skipping commit."
           else
-            git commit -m "ci: update automation-user-management image tag to ${{ env.IMAGE_TAG }} (${{ env.ENVIRONMENT }})"
-            git push
+            git commit -m "ci: update automation-user-management image tag to ${{ needs.version.outputs.image_tag }} (${{ needs.version.outputs.environment }})"
+            for i in 1 2 3; do
+              git pull --rebase origin main && git push && break
+              sleep $((i * 5))
+            done
           fi
