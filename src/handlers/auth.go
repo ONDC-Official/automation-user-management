@@ -31,6 +31,8 @@ func HandleMe(c *fiber.Ctx) error {
 	email, _ := c.Locals("email").(string)
 	userID, _ := c.Locals("user_id").(string)
 	avatarURL, _ := c.Locals("avatar_url").(string)
+	firstName, _ := c.Locals("first_name").(string)
+	lastName, _ := c.Locals("last_name").(string)
 	return c.JSON(fiber.Map{
 		"ok": true,
 		"user": fiber.Map{
@@ -38,6 +40,8 @@ func HandleMe(c *fiber.Ctx) error {
 			"username":  username,
 			"email":     email,
 			"avatarUrl": avatarURL,
+			"firstName": firstName,
+			"lastName":  lastName,
 		},
 	})
 }
@@ -182,7 +186,8 @@ func HandleCallback(c *fiber.Ctx) error {
 	}
 
 	// 4. Generate JWT
-	jwtToken, err := utils.GenerateJWT(userID, user.Email, user.Login, user.AvatarURL)
+	firstName, lastName := splitName(user.Name)
+	jwtToken, err := utils.GenerateJWT(userID, user.Email, user.Login, user.AvatarURL, firstName, lastName)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to generate token")
 	}
@@ -254,6 +259,14 @@ func HandleExchangeToken(c *fiber.Ctx) error {
 	})
 }
 
+
+func splitName(name string) (string, string) {
+	parts := strings.SplitN(strings.TrimSpace(name), " ", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return name, ""
+}
 
 func getCookieSettings() (string, bool) {
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("ENV")), "production") {

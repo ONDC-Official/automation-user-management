@@ -46,5 +46,13 @@ func IsAuthenticated(c *fiber.Ctx) error {
 		c.Locals("avatar_url", avatarURL)
 	}
 
+	if firstName, ok := claims["first_name"].(string); ok {
+		c.Locals("first_name", firstName)
+	}
+
+	if lastName, ok := claims["last_name"].(string); ok {
+		c.Locals("last_name", lastName)
+	}
+
 	return c.Next()
 }
