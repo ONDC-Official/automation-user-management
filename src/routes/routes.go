@@ -25,24 +25,26 @@ func Setup(app *fiber.App) {
 	app.Get("api/notes", handlers.HandleGetNotes)
 
 	// ─── Protected Routes (require authentication) ───────────────
-	api := app.Group("/", middleware.IsAuthenticated)
+	// Note: middleware applied per-route — app.Group("/", mw) in Fiber v2 is
+	// equivalent to app.Use("/", mw) and would intercept /health.
+	auth := middleware.IsAuthenticated
 
 	// Auth
-	api.Get("auth/api/me", handlers.HandleMe)
+	app.Get("/auth/api/me", auth, handlers.HandleMe)
 
 	// Comments
-	api.Post("api/comments", handlers.HandleCreateComment)
-	api.Put("api/comments/:id", handlers.HandleUpdateComment)
-	api.Put("api/comments/:id/resolve", handlers.HandleResolveComment)
-	api.Delete("api/comments/:id", handlers.HandleDeleteComment)
+	app.Post("/api/comments", auth, handlers.HandleCreateComment)
+	app.Put("/api/comments/:id", auth, handlers.HandleUpdateComment)
+	app.Put("/api/comments/:id/resolve", auth, handlers.HandleResolveComment)
+	app.Delete("/api/comments/:id", auth, handlers.HandleDeleteComment)
 
 	// Notes
-	api.Post("api/notes", handlers.HandleCreateNote)
-	api.Put("api/notes/:id", handlers.HandleUpdateNote)
-	api.Delete("api/notes/:id", handlers.HandleDeleteNote)
+	app.Post("/api/notes", auth, handlers.HandleCreateNote)
+	app.Put("/api/notes/:id", auth, handlers.HandleUpdateNote)
+	app.Delete("/api/notes/:id", auth, handlers.HandleDeleteNote)
 
 	// Scenario Preferences
-	api.Get("user/scenario-preferences", handlers.HandleGetScenarioPreferences)
-	api.Put("user/scenario-preferences/:config_key", handlers.HandleUpsertScenarioPreference)
-	api.Delete("user/scenario-preferences/:config_key", handlers.HandleDeleteScenarioPreference)
+	app.Get("/user/scenario-preferences", auth, handlers.HandleGetScenarioPreferences)
+	app.Put("/user/scenario-preferences/:config_key", auth, handlers.HandleUpsertScenarioPreference)
+	app.Delete("/user/scenario-preferences/:config_key", auth, handlers.HandleDeleteScenarioPreference)
 }
