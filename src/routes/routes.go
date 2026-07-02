@@ -10,6 +10,7 @@ import (
 func Setup(app *fiber.App) {
 	// ─── Public Routes ───────────────────────────────────────────
 	app.Get("/", handlers.HandleHealth)
+	app.Get("/health", handlers.HandleHealth)
 	app.Get("/login", handlers.HandleLogin)
 	app.Get("/auth/github/callback", handlers.HandleCallback)
 	app.Post("/auth/exchange", handlers.HandleExchangeToken)
