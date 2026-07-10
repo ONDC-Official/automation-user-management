@@ -21,39 +21,26 @@ var validateComment = validator.New()
 func HandleCreateComment(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(string)
 
-	type CreatePayload struct {
-		UseCaseID       string  `json:"use_case_id" validate:"required"`
-		FlowID          string  `json:"flow_id" validate:"required"`
-		ActionID        string  `json:"action_id" validate:"required"`
-		JSONPath        string  `json:"json_path" validate:"required"`
-		Comment         string  `json:"comment" validate:"required"`
-		ParentCommentID *string `json:"parent_comment_id"`
-	}
-
-	payload := new(CreatePayload)
+	payload := new(CreateCommentPayload)
 	decoder := json.NewDecoder(bytes.NewReader(c.Body()))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(payload); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid json or unknown fields"})
 	}
 
-	if err := validateComment.Struct(payload); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	if payload.Comment == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "comment is required"})
 	}
 
+	now := time.Now()
 	comment := models.Comment{
-		UseCaseID: payload.UseCaseID,
-		FlowID:    payload.FlowID,
-		ActionID:  payload.ActionID,
-		JSONPath:  payload.JSONPath,
 		Comment:   payload.Comment,
 		CreatedBy: userID,
 		Resolved:  false,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
-	// Check if parent comment exists if parent_comment_id is provided
 	if payload.ParentCommentID != nil {
 		objID, err := primitive.ObjectIDFromHex(*payload.ParentCommentID)
 		if err != nil {
@@ -68,6 +55,25 @@ func HandleCreateComment(c *fiber.Ctx) error {
 			}
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to verify parent comment"})
 		}
+
+		parentScope := applyParentScope(parentComment)
+		comment.UseCaseID = parentScope.UseCaseID
+		comment.FlowID = parentScope.FlowID
+		comment.ActionID = parentScope.ActionID
+		comment.JSONPath = parentScope.JSONPath
+		comment.DocumentSlug = parentScope.DocumentSlug
+		comment.SectionID = parentScope.SectionID
+	} else {
+		scope, err := buildCommentFromPayload(*payload)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		}
+		comment.UseCaseID = scope.UseCaseID
+		comment.FlowID = scope.FlowID
+		comment.ActionID = scope.ActionID
+		comment.JSONPath = scope.JSONPath
+		comment.DocumentSlug = scope.DocumentSlug
+		comment.SectionID = scope.SectionID
 	}
 
 	result, err := database.CreateOne("comments", comment)
@@ -80,27 +86,10 @@ func HandleCreateComment(c *fiber.Ctx) error {
 
 // HandleGetComments retrieves comments. Visible to ANY authenticated user.
 func HandleGetComments(c *fiber.Ctx) error {
-	// No "created_by" filter here, as per requirement
-	filter := bson.M{}
-
-	if val := c.Query("use_case_id"); val != "" {
-		filter["use_case_id"] = val
+	filter, err := buildCommentFilter(commentListQueryFromCtx(c))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
-	if val := c.Query("flow_id"); val != "" {
-		filter["flow_id"] = val
-	}
-	if val := c.Query("action_id"); val != "" {
-		filter["action_id"] = val
-	}
-	if val := c.Query("json_path"); val != "" {
-		filter["json_path"] = val
-	}
-	if val := c.Query("parent_comment_id"); val != "" {
-		objID, _ := primitive.ObjectIDFromHex(val)
-		filter["parent_comment_id"] = objID
-	}
-
-	
 
 	pipeline := mongo.Pipeline{
 		{{Key: "$match", Value: filter}},
