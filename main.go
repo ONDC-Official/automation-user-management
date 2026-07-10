@@ -35,6 +35,10 @@ func main() {
 		log.Println("Warning: Failed to create TTL index for exchange_codes:", err)
 	}
 
+	if err := database.EnsureCommentIndexes(); err != nil {
+		log.Println("Warning: Failed to create indexes for comments:", err)
+	}
+
 	app := fiber.New()
 
 	// CORS: allow frontend origin (credentials for cookies/session)
