@@ -8,12 +8,15 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func GenerateJWT(userID, email, username, avatarURL string) (string, error) {
+func GenerateJWT(userID, email, username, avatarURL, firstName, lastName string) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id":    userID,
+		"role":       "AUDITOR",
 		"email":      email,
 		"username":   username,
 		"avatar_url": avatarURL,
+		"first_name": firstName,
+		"last_name":  lastName,
 		"exp":        time.Now().Add(8 * time.Hour).Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

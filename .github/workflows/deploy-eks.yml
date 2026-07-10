@@ -1,0 +1,189 @@
+name: Build and Deploy to EKS
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - release-staging
+
+permissions:
+  packages: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      semver:      ${{ steps.set.outputs.semver }}
+      image_tag:   ${{ steps.set.outputs.image_tag }}
+      environment: ${{ steps.set.outputs.environment }}
+      target_file: ${{ steps.set.outputs.target_file }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version and compute image tag
+        id: set
+        run: |
+          if [ -f VERSION ]; then
+            SEMVER=$(tr -d '[:space:]' < VERSION)
+          else
+            SEMVER=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --match '[0-9]*' 2>/dev/null | sed 's/^v//' || true)
+          fi
+          [ -z "$SEMVER" ] && SEMVER="0.0.0"
+
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            ENV=dev
+            TARGET="k8/aws/helm/service-layer/values.yaml"
+          else
+            ENV=staging
+            TARGET="k8/aws/helm/service-layer/values-staging.yaml"
+          fi
+
+          IMAGE_TAG="${ENV}-${SEMVER}-${SHORT_SHA}"
+
+          echo "semver=${SEMVER}"       >> $GITHUB_OUTPUT
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "environment=${ENV}"     >> $GITHUB_OUTPUT
+          echo "target_file=${TARGET}"  >> $GITHUB_OUTPUT
+
+  build-and-push:
+    needs: version
+    runs-on: ubuntu-latest
+    environment: ${{ needs.version.outputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Set image metadata
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/ondc-official/automation-user-management
+          tags: |
+            type=raw,value=${{ needs.version.outputs.image_tag }}
+            type=raw,value=latest,enable=${{ github.ref_name != 'main' }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.event.repository.html_url }}
+            org.opencontainers.image.version=${{ needs.version.outputs.semver }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  update-iac:
+    needs: [version, build-and-push]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          repositories: automation-iac
+
+      - name: Checkout automation-iac
+        uses: actions/checkout@v4
+        with:
+          repository: ONDC-Official/automation-iac
+          token: ${{ steps.app-token.outputs.token }}
+          path: automation-iac
+
+      - name: Update image tag in Helm values file
+        run: |
+          python3 << 'PYEOF'
+          import re, os
+
+          target = f"automation-iac/{os.environ['TARGET_FILE']}"
+          image_tag = os.environ['IMAGE_TAG']
+          expected_repository = os.environ['EXPECTED_REPOSITORY']
+
+          with open(target, 'r') as f:
+              lines = f.readlines()
+
+          in_service = False
+          in_image = False
+          found_service = False
+          found_repository = False
+          updated = False
+          result = []
+
+          for line in lines:
+              if re.match(r'^[A-Za-z0-9_]+:\s*$', line):
+                  in_service = line.strip() == 'automationUserManagement:'
+                  in_image = False
+                  found_service = found_service or in_service
+
+              if in_service and re.match(r'^\s{2}image:\s*$', line):
+                  in_image = True
+              elif in_service and re.match(r'^\s{2}[A-Za-z0-9_]+:\s*$', line):
+                  in_image = False
+
+              if in_service and in_image and re.match(r'^\s{4}repository:\s', line):
+                  repository = line.split(':', 1)[1].strip().strip('\'"')
+                  if repository != expected_repository:
+                      raise RuntimeError(
+                          f"automationUserManagement.image.repository is {repository}, expected {expected_repository}"
+                      )
+                  found_repository = True
+
+              if in_service and in_image and re.match(r'^\s{4}tag:\s', line):
+                  line = re.sub(r'(tag:\s).*', rf'\g<1>{image_tag}', line)
+                  updated = True
+
+              result.append(line)
+
+          if not found_service:
+              raise RuntimeError(f"automationUserManagement not found in {target}")
+          if not found_repository:
+              raise RuntimeError(f"automationUserManagement.image.repository not found in {target}")
+          if not updated:
+              raise RuntimeError(f"automationUserManagement.image.tag not found in {target}")
+
+          with open(target, 'w') as f:
+              f.writelines(result)
+
+          print(f"Updated automationUserManagement image tag to: {image_tag}")
+          PYEOF
+        env:
+          TARGET_FILE:         ${{ needs.version.outputs.target_file }}
+          IMAGE_TAG:           ${{ needs.version.outputs.image_tag }}
+          EXPECTED_REPOSITORY: ghcr.io/ondc-official/automation-user-management
+
+      - name: Commit and push tag update to IaC repo
+        run: |
+          cd automation-iac
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "${{ needs.version.outputs.target_file }}"
+          if git diff --staged --quiet; then
+            echo "Image tag already up to date, skipping commit."
+          else
+            git commit -m "ci: update automation-user-management image tag to ${{ needs.version.outputs.image_tag }} (${{ needs.version.outputs.environment }})"
+            for i in 1 2 3; do
+              git pull --rebase origin main && git push && break
+              sleep $((i * 5))
+            done
+          fi
