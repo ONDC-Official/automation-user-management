@@ -38,6 +38,10 @@ func main() {
 	if err := database.EnsureUniqueIndex("scenario_preferences", "user_id"); err != nil {
 		log.Println("Warning: Failed to create unique index for scenario_preferences:", err)
 	}
+	
+	if err := database.EnsureCommentIndexes(); err != nil {
+		log.Println("Warning: Failed to create indexes for comments:", err)
+	}
 
 	app := fiber.New()
 
