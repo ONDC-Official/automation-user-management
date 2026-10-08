@@ -30,11 +30,26 @@ var (
 	// Deliberately no hardcoded fallback: a default shared secret in source is
 	// worse than none, because it would silently "work" in production.
 	MCPServiceToken string
+
+	// Redis shared with the MCP server. When a key is regenerated or revoked we
+	// delete the MCP's cached verify answer for the old key there, so section 3
+	// of the consent document ("the old key stops working immediately") holds
+	// even though the MCP caches verify results.
+	RedisHost     string
+	RedisPort     string
+	RedisUsername string
+	RedisPassword string
+
+	// MCPRedisKeyPrefix must equal the MCP server's REDIS_KEY_PREFIX, or our
+	// deletes miss its cache entries and revocation waits for their TTL.
+	MCPRedisKeyPrefix string
 )
 
 const (
 	defaultMCPKeyTTLDays     = 90
 	defaultMCPConsentVersion = "2026-10-v1"
+	defaultRedisPort         = "6379"
+	defaultMCPRedisKeyPrefix = "ondc-mcp"
 )
 
 func Load() {
@@ -84,4 +99,19 @@ func Load() {
 	if MCPServiceToken == "" {
 		log.Println("MCP_SERVICE_TOKEN is not set; /mcp/verify is reachable without a service token")
 	}
+
+	// 5. Redis shared with the MCP server (optional; see RedisHost)
+	RedisHost = os.Getenv("REDIS_HOST")
+	RedisPort = envOr("REDIS_PORT", defaultRedisPort)
+	RedisUsername = os.Getenv("REDIS_USERNAME")
+	RedisPassword = os.Getenv("REDIS_PASSWORD")
+	MCPRedisKeyPrefix = envOr("MCP_REDIS_KEY_PREFIX", defaultMCPRedisKeyPrefix)
+}
+
+// envOr returns the environment variable, or fallback when it is unset or empty.
+func envOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
 }
