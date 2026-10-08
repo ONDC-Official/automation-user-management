@@ -122,8 +122,15 @@ func HandleGenerateMCPKey(c *fiber.Ctx) error {
 			"$unset": bson.M{"revoked_at": "", "last_used_at": ""},
 		}
 
-		_, err = database.UpsertOne(mcpKeysCollection, bson.M{"user_id": userID}, update)
-		if err == nil {
+		// Returning the old document in the same atomic write gives us exactly the
+		// key this one replaces, even if two generates race.
+		var replaced models.MCPKey
+		err = database.UpsertReturningOld(mcpKeysCollection, bson.M{"user_id": userID}, update, &replaced)
+		if err == nil || errors.Is(err, mongo.ErrNoDocuments) {
+			// nil means a previous key was replaced; clear the MCP's cached check so it stops working now.
+			if err == nil {
+				database.InvalidateMCPKeyCheck(replaced.KeyHash, replaced.KeyHint)
+			}
 			resp = models.GenerateMCPKeyResponse{
 				Key:            key,
 				KeyHint:        hint,
@@ -169,13 +176,19 @@ func HandleRevokeMCPKey(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 	}
 
-	result, err := database.DeleteOne(mcpKeysCollection, bson.M{"user_id": userID})
+	// Returning the deleted document gives us its hash, to clear the MCP's cached check.
+	var revoked models.MCPKey
+	err := database.DeleteReturningOld(mcpKeysCollection, bson.M{"user_id": userID}, &revoked)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return c.JSON(fiber.Map{"revoked": false})
+	}
 	if err != nil {
 		log.Printf("mcp key revoke: delete failed for user %s: %v", userID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to revoke key"})
 	}
 
-	return c.JSON(fiber.Map{"revoked": result.DeletedCount > 0})
+	database.InvalidateMCPKeyCheck(revoked.KeyHash, revoked.KeyHint)
+	return c.JSON(fiber.Map{"revoked": true})
 }
 
 // HandleVerifyMCPKey is called by the MCP server, not by a browser. The key in
@@ -183,9 +196,10 @@ func HandleRevokeMCPKey(c *fiber.Ctx) error {
 // sit behind IsAuthenticated.
 func HandleVerifyMCPKey(c *fiber.Ctx) error {
 	// The body carries a credential and the response carries identity; neither
-	// belongs in any cache. Section 3 of the consent document also promises a
-	// regenerated key's predecessor stops working immediately, which no cache
-	// of this response could honour.
+	// belongs in an HTTP cache. Section 3 of the consent document also promises
+	// a regenerated key's predecessor stops working immediately: the MCP's own
+	// Redis cache honours that only because generate and revoke clear it (see
+	// database.InvalidateMCPKeyCheck), which no HTTP cache would allow.
 	c.Set("Cache-Control", "no-store")
 
 	// json.Unmarshal rather than c.BodyParser: BodyParser insists on a JSON
