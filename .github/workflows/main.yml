@@ -66,6 +66,9 @@ jobs:
           CLIENT_URL=https://workbench.ondc.tech
           MONGO_URI=mongodb://localhost:27017
           DB_NAME=developer_guide
+          MCP_KEY_TTL_DAYS=90
+          MCP_CONSENT_VERSION=2026-10-v1
+          MCP_SERVICE_TOKEN=${{ secrets.MCP_SERVICE_TOKEN }}
           EOL
           EOF
 
@@ -162,6 +165,9 @@ jobs:
           CLIENT_URL=https://dev-automation.ondc.org
           MONGO_URI=mongodb://localhost:27017
           DB_NAME=developer_guide
+          MCP_KEY_TTL_DAYS=90
+          MCP_CONSENT_VERSION=2026-10-v1
+          MCP_SERVICE_TOKEN=${{ secrets.MCP_SERVICE_TOKEN_DEV || secrets.MCP_SERVICE_TOKEN }}
           EOL
           EOF
 

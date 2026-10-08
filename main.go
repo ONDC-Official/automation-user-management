@@ -43,7 +43,21 @@ func main() {
 		log.Println("Warning: Failed to create indexes for comments:", err)
 	}
 
-	app := fiber.New()
+	if err := database.EnsureMCPKeyIndexes(); err != nil {
+		log.Println("Warning: Failed to create indexes for mcp_keys:", err)
+	}
+
+	app := fiber.New(fiber.Config{
+		// consent_ip must record the user's address, not the ingress's, or
+		// section 4 of the MCP consent document ("we record your IP address")
+		// becomes a false statement.
+		//
+		// Safe here only because the service is reached exclusively through the
+		// ALB/ingress, which overwrites this header. If anything is ever given
+		// a direct route to this process, X-Forwarded-For becomes
+		// client-spoofable and this line must be revisited.
+		ProxyHeader: fiber.HeaderXForwardedFor,
+	})
 
 	// CORS: allow frontend origin (credentials for cookies/session)
 	corsCfg := cors.Config{
