@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 	"golang.org/x/oauth2"
@@ -16,6 +17,39 @@ var (
 	CookieDomain string
 	JWTSecret    string
 	StateKey     = "oauth-state"
+
+	// MCP API keys. MCPKeyTTLDays must stay in step with section 3 of the MCP
+	// consent document, which tells the user how long their key lasts; changing
+	// one without the other makes the document untrue.
+	MCPKeyTTLDays     int
+	MCPConsentVersion string
+
+	// MCPServiceToken optionally gates /mcp/verify. Empty means the endpoint is
+	// reachable without it, which is the default so that local development and a
+	// first MCP integration work without cross-repo secret coordination.
+	// Deliberately no hardcoded fallback: a default shared secret in source is
+	// worse than none, because it would silently "work" in production.
+	MCPServiceToken string
+
+	// Redis shared with the MCP server. When a key is regenerated or revoked we
+	// delete the MCP's cached verify answer for the old key there, so section 3
+	// of the consent document ("the old key stops working immediately") holds
+	// even though the MCP caches verify results.
+	RedisHost     string
+	RedisPort     string
+	RedisUsername string
+	RedisPassword string
+
+	// MCPRedisKeyPrefix must equal the MCP server's REDIS_KEY_PREFIX, or our
+	// deletes miss its cache entries and revocation waits for their TTL.
+	MCPRedisKeyPrefix string
+)
+
+const (
+	defaultMCPKeyTTLDays     = 90
+	defaultMCPConsentVersion = "2026-10-v1"
+	defaultRedisPort         = "6379"
+	defaultMCPRedisKeyPrefix = "ondc-mcp"
 )
 
 func Load() {
@@ -43,5 +77,41 @@ func Load() {
 		ClientURL = "http://localhost:3000"
 	}
 
-	
+	// 4. MCP API keys
+	MCPKeyTTLDays = defaultMCPKeyTTLDays
+	if raw := os.Getenv("MCP_KEY_TTL_DAYS"); raw != "" {
+		days, err := strconv.Atoi(raw)
+		if err != nil || days <= 0 {
+			// Fall back rather than accept it: a zero or negative TTL would mint
+			// keys that are already expired.
+			log.Printf("Invalid MCP_KEY_TTL_DAYS %q, using %d", raw, defaultMCPKeyTTLDays)
+		} else {
+			MCPKeyTTLDays = days
+		}
+	}
+
+	MCPConsentVersion = os.Getenv("MCP_CONSENT_VERSION")
+	if MCPConsentVersion == "" {
+		MCPConsentVersion = defaultMCPConsentVersion
+	}
+
+	MCPServiceToken = os.Getenv("MCP_SERVICE_TOKEN")
+	if MCPServiceToken == "" {
+		log.Println("MCP_SERVICE_TOKEN is not set; /mcp/verify is reachable without a service token")
+	}
+
+	// 5. Redis shared with the MCP server (optional; see RedisHost)
+	RedisHost = os.Getenv("REDIS_HOST")
+	RedisPort = envOr("REDIS_PORT", defaultRedisPort)
+	RedisUsername = os.Getenv("REDIS_USERNAME")
+	RedisPassword = os.Getenv("REDIS_PASSWORD")
+	MCPRedisKeyPrefix = envOr("MCP_REDIS_KEY_PREFIX", defaultMCPRedisKeyPrefix)
+}
+
+// envOr returns the environment variable, or fallback when it is unset or empty.
+func envOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
 }

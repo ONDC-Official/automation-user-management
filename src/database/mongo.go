@@ -101,6 +101,24 @@ func UpsertOne(collectionName string, filter interface{}, update interface{}) (*
 	return GetCollection(collectionName).UpdateOne(ctx, filter, update, opts)
 }
 
+// UpsertReturningOld is UpsertOne that also decodes the document as it was
+// before the write into old, in the same atomic step. It returns
+// mongo.ErrNoDocuments when nothing matched and a new document was inserted.
+func UpsertReturningOld(collectionName string, filter interface{}, update interface{}, old interface{}) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	opts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.Before)
+	return GetCollection(collectionName).FindOneAndUpdate(ctx, filter, update, opts).Decode(old)
+}
+
+// DeleteReturningOld deletes a single document and decodes it into old, in the
+// same atomic step. It returns mongo.ErrNoDocuments when nothing matched.
+func DeleteReturningOld(collectionName string, filter interface{}, old interface{}) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return GetCollection(collectionName).FindOneAndDelete(ctx, filter).Decode(old)
+}
+
 // EnsureUniqueIndex creates a unique index on the given field for a collection.
 func EnsureUniqueIndex(collectionName string, fieldName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

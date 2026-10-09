@@ -43,7 +43,28 @@ func main() {
 		log.Println("Warning: Failed to create indexes for comments:", err)
 	}
 
-	app := fiber.New()
+	if err := database.EnsureMCPKeyIndexes(); err != nil {
+		log.Println("Warning: Failed to create indexes for mcp_keys:", err)
+	}
+
+	// Redis shared with the MCP server, so regenerate and revoke can clear its cached key checks.
+	if config.RedisHost == "" {
+		log.Println("Warning: REDIS_HOST is not set; regenerated or revoked MCP keys keep working until the MCP's cache expires")
+	} else if err := database.ConnectRedis(config.RedisHost, config.RedisPort, config.RedisUsername, config.RedisPassword, config.MCPRedisKeyPrefix); err != nil {
+		log.Println("Warning: Redis not reachable yet; it will be retried on each key change:", err)
+	}
+
+	app := fiber.New(fiber.Config{
+		// consent_ip must record the user's address, not the ingress's, or
+		// section 4 of the MCP consent document ("we record your IP address")
+		// becomes a false statement.
+		//
+		// Safe here only because the service is reached exclusively through the
+		// ALB/ingress, which overwrites this header. If anything is ever given
+		// a direct route to this process, X-Forwarded-For becomes
+		// client-spoofable and this line must be revisited.
+		ProxyHeader: fiber.HeaderXForwardedFor,
+	})
 
 	// CORS: allow frontend origin (credentials for cookies/session)
 	corsCfg := cors.Config{
