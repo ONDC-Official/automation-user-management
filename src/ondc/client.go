@@ -68,6 +68,24 @@ type Organisation struct {
 	IsRepresentative bool       `json:"is_representative"`
 	Status           int        `json:"status"`
 	SubscriberIDs    []string   `json:"subscriber_ids"`
+	// Configs are the organisation's NP Portal environment registrations: one per
+	// subscriber URL + role + domain + version + use case. Scenario Testing shows them.
+	Configs []Config `json:"configs"`
+}
+
+// Config is one NP Portal registration, as NP Portal sends it (values are not
+// translated to Workbench's names here).
+type Config struct {
+	EnvironmentAccessID FlexString `json:"environment_access_id"`
+	Environment         string     `json:"environment"`
+	Status              string     `json:"status"`
+	RequestType         string     `json:"request_type"`
+	SubscriberID        string     `json:"subscriber_id"`
+	SubscriberURL       string     `json:"subscriber_url"`
+	Domain              string     `json:"domain"`
+	Version             string     `json:"version"`
+	UseCase             string     `json:"usecase"`
+	NPType              string     `json:"np_type"`
 }
 
 type UserInfo struct {

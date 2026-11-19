@@ -85,6 +85,7 @@ func addONDCProfile(user fiber.Map, userID string) {
 			"isRepresentative": o.IsRepresentative,
 			"status":           o.Status,
 			"subscriberIds":    subscriberIDs,
+			"configs":          orgConfigsForProfile(o.Configs),
 		})
 	}
 	user["ondcUserId"] = u.ONDCUserID
@@ -93,6 +94,48 @@ func addONDCProfile(user fiber.Map, userID string) {
 	if !u.LastLoginAt.IsZero() {
 		user["lastLoginAt"] = u.LastLoginAt
 	}
+}
+
+// toUserOrgConfigs keeps NP Portal's configs as sent, only trimming spaces.
+// Values are not translated to Workbench's names; the website decides what fits.
+func toUserOrgConfigs(in []ondc.Config) []models.UserOrgConfig {
+	out := make([]models.UserOrgConfig, 0, len(in))
+	for _, c := range in {
+		out = append(out, models.UserOrgConfig{
+			EnvironmentAccessID: strings.TrimSpace(string(c.EnvironmentAccessID)),
+			Environment:         strings.TrimSpace(c.Environment),
+			Status:              strings.TrimSpace(c.Status),
+			RequestType:         strings.TrimSpace(c.RequestType),
+			SubscriberID:        strings.TrimSpace(c.SubscriberID),
+			SubscriberURL:       strings.TrimSpace(c.SubscriberURL),
+			Domain:              strings.TrimSpace(c.Domain),
+			Version:             strings.TrimSpace(c.Version),
+			UseCase:             strings.TrimSpace(c.UseCase),
+			NPType:              strings.TrimSpace(c.NPType),
+		})
+	}
+	return out
+}
+
+// orgConfigsForProfile is how /auth/api/me shows an organisation's configs:
+// the same camelCase style as the rest of the profile, never null.
+func orgConfigsForProfile(in []models.UserOrgConfig) []fiber.Map {
+	out := make([]fiber.Map, 0, len(in))
+	for _, c := range in {
+		out = append(out, fiber.Map{
+			"environmentAccessId": c.EnvironmentAccessID,
+			"environment":         c.Environment,
+			"status":              c.Status,
+			"requestType":         c.RequestType,
+			"subscriberId":        c.SubscriberID,
+			"subscriberUrl":       c.SubscriberURL,
+			"domain":              c.Domain,
+			"version":             c.Version,
+			"usecase":             c.UseCase,
+			"npType":              c.NPType,
+		})
+	}
+	return out
 }
 
 // HandleLogin initiates the OAuth flow
@@ -372,6 +415,7 @@ func saveONDCUser(info *ondc.UserInfo) (*models.User, error) {
 			IsRepresentative: o.IsRepresentative,
 			Status:           o.Status,
 			SubscriberIDs:    o.SubscriberIDs,
+			Configs:          toUserOrgConfigs(o.Configs),
 		})
 	}
 	set := bson.M{
