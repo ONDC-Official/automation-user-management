@@ -119,3 +119,48 @@ func TestLoginURL(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+// A trimmed copy of a real UAT reply (19 Nov 2026) with organisation configs.
+const uatSuccessWithConfigs = `{"status":"success","requestId":null,"data":{"user_id":25716,"email":"uat_1@yopmail.com","first_name":"UAT","last_name":"1","status":1,"organisations":[{"organisation_id":11899,"organisation_name":"UAT_1 Org","network_status":3,"participant_id":"11899.participant.ondc.org","np_type":"Admin","is_representative":true,"status":1,"subscriber_ids":["newuattet22442.com"],"configs":[` +
+	`{"environment_access_id":5128,"environment":"Pre-Prod","status":"Subscribed","request_type":"Update Request","subscriber_id":"newuattet22442.com","subscriber_url":"https://newuattet22442.com/","domain":"ONDC:RET10","version":"v 1.2","usecase":"Grocery","np_type":"BPP"},` +
+	`{"environment_access_id":"5129","environment":"Pre-Prod","status":"Not subscribed","request_type":"New Request","subscriber_id":"testloc2259.com","subscriber_url":"https://testloc2259.com/","domain":"nic2004:60232","version":"v 1.2","usecase":"Logistics - On Network","np_type":"BAP"}` +
+	`]}]}}`
+
+func TestExchange_ReadsOrganisationConfigs(t *testing.T) {
+	srv := server(t, 200, uatSuccessWithConfigs, nil)
+	defer srv.Close()
+
+	info, err := NewClient(srv.URL, "cid", "sec").Exchange(context.Background(), "abc")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cfgs := info.Organisations[0].Configs
+	if len(cfgs) != 2 {
+		t.Fatalf("configs = %+v", cfgs)
+	}
+	want := Config{EnvironmentAccessID: "5128", Environment: "Pre-Prod", Status: "Subscribed", RequestType: "Update Request",
+		SubscriberID: "newuattet22442.com", SubscriberURL: "https://newuattet22442.com/", Domain: "ONDC:RET10",
+		Version: "v 1.2", UseCase: "Grocery", NPType: "BPP"}
+	if cfgs[0] != want {
+		t.Errorf("config[0] = %+v, want %+v", cfgs[0], want)
+	}
+	// environment_access_id may come as a number or a string.
+	if cfgs[1].EnvironmentAccessID != "5129" || cfgs[1].Status != "Not subscribed" || cfgs[1].NPType != "BAP" {
+		t.Errorf("config[1] = %+v", cfgs[1])
+	}
+}
+
+func TestExchange_ConfigsMissingOrNull(t *testing.T) {
+	for name, configs := range map[string]string{"missing": ``, "null": `,"configs":null`, "empty": `,"configs":[]`} {
+		body := `{"status":"success","data":{"user_id":1,"email":"a@b.c","organisations":[{"organisation_id":7` + configs + `}]}}`
+		srv := server(t, 200, body, nil)
+		info, err := NewClient(srv.URL, "cid", "sec").Exchange(context.Background(), "abc")
+		srv.Close()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", name, err)
+		}
+		if n := len(info.Organisations[0].Configs); n != 0 {
+			t.Errorf("%s: got %d configs, want 0", name, n)
+		}
+	}
+}
