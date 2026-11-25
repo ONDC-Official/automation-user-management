@@ -117,22 +117,39 @@ func toUserOrgConfigs(in []ondc.Config) []models.UserOrgConfig {
 	return out
 }
 
+// profileOrgConfig is one NP Portal config as /auth/api/me returns it:
+// camelCase keys matching the rest of the profile. Keeping it a typed struct
+// means the output keys live in one place, so adding a field to the model is a
+// compile-time reminder to add it here too.
+type profileOrgConfig struct {
+	EnvironmentAccessID string `json:"environmentAccessId"`
+	Environment         string `json:"environment"`
+	Status              string `json:"status"`
+	RequestType         string `json:"requestType"`
+	SubscriberID        string `json:"subscriberId"`
+	SubscriberURL       string `json:"subscriberUrl"`
+	Domain              string `json:"domain"`
+	Version             string `json:"version"`
+	UseCase             string `json:"useCase"`
+	NPType              string `json:"npType"`
+}
+
 // orgConfigsForProfile is how /auth/api/me shows an organisation's configs:
-// the same camelCase style as the rest of the profile, never null.
-func orgConfigsForProfile(in []models.UserOrgConfig) []fiber.Map {
-	out := make([]fiber.Map, 0, len(in))
+// camelCase, never null.
+func orgConfigsForProfile(in []models.UserOrgConfig) []profileOrgConfig {
+	out := make([]profileOrgConfig, 0, len(in))
 	for _, c := range in {
-		out = append(out, fiber.Map{
-			"environmentAccessId": c.EnvironmentAccessID,
-			"environment":         c.Environment,
-			"status":              c.Status,
-			"requestType":         c.RequestType,
-			"subscriberId":        c.SubscriberID,
-			"subscriberUrl":       c.SubscriberURL,
-			"domain":              c.Domain,
-			"version":             c.Version,
-			"usecase":             c.UseCase,
-			"npType":              c.NPType,
+		out = append(out, profileOrgConfig{
+			EnvironmentAccessID: c.EnvironmentAccessID,
+			Environment:         c.Environment,
+			Status:              c.Status,
+			RequestType:         c.RequestType,
+			SubscriberID:        c.SubscriberID,
+			SubscriberURL:       c.SubscriberURL,
+			Domain:              c.Domain,
+			Version:             c.Version,
+			UseCase:             c.UseCase,
+			NPType:              c.NPType,
 		})
 	}
 	return out

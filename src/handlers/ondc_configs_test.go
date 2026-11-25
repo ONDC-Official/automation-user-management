@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"testing"
 
 	"automation-developer-guide/src/models"
@@ -37,10 +38,22 @@ func TestOrgConfigsForProfile_CamelCaseAndNeverNull(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d configs", len(got))
 	}
-	c := got[0]
-	for key, want := range map[string]string{"subscriberUrl": "https://a.com/", "npType": "BAP", "domain": "ONDC:RET10", "version": "1.2.5", "usecase": "GROCERY", "environmentAccessId": "9"} {
-		if c[key] != want {
-			t.Errorf("%s = %v, want %q", key, c[key], want)
+	// Check the JSON the website receives: camelCase keys, and exactly 10 of them
+	// (so adding a field to the model without exposing it here is caught).
+	raw, err := json.Marshal(got[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]string
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(m) != 10 {
+		t.Errorf("got %d keys, want 10: %v", len(m), m)
+	}
+	for key, want := range map[string]string{"subscriberUrl": "https://a.com/", "npType": "BAP", "domain": "ONDC:RET10", "version": "1.2.5", "useCase": "GROCERY", "environmentAccessId": "9"} {
+		if m[key] != want {
+			t.Errorf("%s = %v, want %q", key, m[key], want)
 		}
 	}
 }
