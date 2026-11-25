@@ -34,4 +34,21 @@ type UserOrganisation struct {
 	IsRepresentative bool     `json:"is_representative" bson:"is_representative"`
 	Status           int      `json:"status" bson:"status"`
 	SubscriberIDs    []string `json:"subscriber_ids" bson:"subscriber_ids"`
+	// Configs: NP Portal registrations from the last login, as sent.
+	Configs []UserOrgConfig `json:"configs" bson:"configs"`
+}
+
+// UserOrgConfig is one NP Portal registration (subscriber URL, role, domain,
+// version, use case) saved from the last ONDC login.
+type UserOrgConfig struct {
+	EnvironmentAccessID string `json:"environment_access_id" bson:"environment_access_id"`
+	Environment         string `json:"environment" bson:"environment"`
+	Status              string `json:"status" bson:"status"`
+	RequestType         string `json:"request_type" bson:"request_type"`
+	SubscriberID        string `json:"subscriber_id" bson:"subscriber_id"`
+	SubscriberURL       string `json:"subscriber_url" bson:"subscriber_url"`
+	Domain              string `json:"domain" bson:"domain"`
+	Version             string `json:"version" bson:"version"`
+	UseCase             string `json:"usecase" bson:"usecase"`
+	NPType              string `json:"np_type" bson:"np_type"`
 }

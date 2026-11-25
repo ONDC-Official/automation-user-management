@@ -85,6 +85,7 @@ func addONDCProfile(user fiber.Map, userID string) {
 			"isRepresentative": o.IsRepresentative,
 			"status":           o.Status,
 			"subscriberIds":    subscriberIDs,
+			"configs":          orgConfigsForProfile(o.Configs),
 		})
 	}
 	user["ondcUserId"] = u.ONDCUserID
@@ -93,6 +94,65 @@ func addONDCProfile(user fiber.Map, userID string) {
 	if !u.LastLoginAt.IsZero() {
 		user["lastLoginAt"] = u.LastLoginAt
 	}
+}
+
+// toUserOrgConfigs keeps NP Portal's configs as sent, only trimming spaces.
+// Values are not translated to Workbench's names; the website decides what fits.
+func toUserOrgConfigs(in []ondc.Config) []models.UserOrgConfig {
+	out := make([]models.UserOrgConfig, 0, len(in))
+	for _, c := range in {
+		out = append(out, models.UserOrgConfig{
+			EnvironmentAccessID: strings.TrimSpace(string(c.EnvironmentAccessID)),
+			Environment:         strings.TrimSpace(c.Environment),
+			Status:              strings.TrimSpace(c.Status),
+			RequestType:         strings.TrimSpace(c.RequestType),
+			SubscriberID:        strings.TrimSpace(c.SubscriberID),
+			SubscriberURL:       strings.TrimSpace(c.SubscriberURL),
+			Domain:              strings.TrimSpace(c.Domain),
+			Version:             strings.TrimSpace(c.Version),
+			UseCase:             strings.TrimSpace(c.UseCase),
+			NPType:              strings.TrimSpace(c.NPType),
+		})
+	}
+	return out
+}
+
+// profileOrgConfig is one NP Portal config as /auth/api/me returns it:
+// camelCase keys matching the rest of the profile. Keeping it a typed struct
+// means the output keys live in one place, so adding a field to the model is a
+// compile-time reminder to add it here too.
+type profileOrgConfig struct {
+	EnvironmentAccessID string `json:"environmentAccessId"`
+	Environment         string `json:"environment"`
+	Status              string `json:"status"`
+	RequestType         string `json:"requestType"`
+	SubscriberID        string `json:"subscriberId"`
+	SubscriberURL       string `json:"subscriberUrl"`
+	Domain              string `json:"domain"`
+	Version             string `json:"version"`
+	UseCase             string `json:"useCase"`
+	NPType              string `json:"npType"`
+}
+
+// orgConfigsForProfile is how /auth/api/me shows an organisation's configs:
+// camelCase, never null.
+func orgConfigsForProfile(in []models.UserOrgConfig) []profileOrgConfig {
+	out := make([]profileOrgConfig, 0, len(in))
+	for _, c := range in {
+		out = append(out, profileOrgConfig{
+			EnvironmentAccessID: c.EnvironmentAccessID,
+			Environment:         c.Environment,
+			Status:              c.Status,
+			RequestType:         c.RequestType,
+			SubscriberID:        c.SubscriberID,
+			SubscriberURL:       c.SubscriberURL,
+			Domain:              c.Domain,
+			Version:             c.Version,
+			UseCase:             c.UseCase,
+			NPType:              c.NPType,
+		})
+	}
+	return out
 }
 
 // HandleLogin initiates the OAuth flow
@@ -372,6 +432,7 @@ func saveONDCUser(info *ondc.UserInfo) (*models.User, error) {
 			IsRepresentative: o.IsRepresentative,
 			Status:           o.Status,
 			SubscriberIDs:    o.SubscriberIDs,
+			Configs:          toUserOrgConfigs(o.Configs),
 		})
 	}
 	set := bson.M{
